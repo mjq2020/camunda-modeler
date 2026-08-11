@@ -11,6 +11,7 @@
 const Config = require('..');
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const sinon = require('sinon');
@@ -272,6 +273,136 @@ describe('Config', function() {
         { id: 'com.foo.Bar' }, // local
         { id: 'single', FOO: 'BAR' } // global
       ]);
+    });
+
+
+    it('should reuse cached templates when files are unchanged', function() {
+
+      // given
+      const file = {
+        path: getAbsolutePath('fixtures/project/bar.bpmn')
+      };
+
+      const config = new Config({
+        resourcesPaths: [
+          getAbsolutePath('fixtures/ok')
+        ],
+        userPath: 'foo'
+      });
+
+      const readFileSync = sinon.spy(fs, 'readFileSync');
+
+      const templateReadCount = () => readFileSync.getCalls().filter(
+        call => call.args[0].includes('element-templates')
+      ).length;
+
+      try {
+
+        // when
+        config.get('bpmn.elementTemplates', file);
+
+        const readsAfterFirst = templateReadCount();
+
+        config.get('bpmn.elementTemplates', file);
+
+        const readsAfterSecond = templateReadCount();
+
+        // then
+        // the second get reuses the cache, adding no template file reads
+        expect(readsAfterFirst).to.be.above(0);
+        expect(readsAfterSecond).to.equal(readsAfterFirst);
+      } finally {
+        readFileSync.restore();
+      }
+    });
+
+
+    it('should re-read a template when its file changes', function() {
+
+      // given
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'element-templates-'));
+      const templatesDir = path.join(tmpDir, 'element-templates');
+
+      fs.mkdirSync(templatesDir);
+
+      const templatePath = path.join(templatesDir, 'list.json');
+
+      fs.writeFileSync(templatePath, JSON.stringify([ { id: 'A' } ]));
+
+      const config = new Config({
+        resourcesPaths: [ tmpDir ],
+        userPath: 'foo'
+      });
+
+      try {
+
+        // when
+        const first = config.get('bpmn.elementTemplates', null);
+
+        // change the file, forcing a different modification time
+        fs.writeFileSync(templatePath, JSON.stringify([ { id: 'B' } ]));
+        fs.utimesSync(templatePath, new Date(), new Date(Date.now() + 1000));
+
+        const second = config.get('bpmn.elementTemplates', null);
+
+        // then
+        expect(first).to.eql([ { id: 'A' } ]);
+        expect(second).to.eql([ { id: 'B' } ]);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+
+    it('should skip a file that vanished between globbing and stat', function() {
+
+      // given
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'element-templates-'));
+      const templatesDir = path.join(tmpDir, 'element-templates');
+
+      fs.mkdirSync(templatesDir);
+
+      const keptPath = path.join(templatesDir, 'kept.json');
+      const vanishedPath = path.join(templatesDir, 'vanished.json');
+
+      fs.writeFileSync(keptPath, JSON.stringify([ { id: 'kept' } ]));
+      fs.writeFileSync(vanishedPath, JSON.stringify([ { id: 'vanished' } ]));
+
+      const config = new Config({
+        resourcesPaths: [ tmpDir ],
+        userPath: 'foo'
+      });
+
+      // globbing returns POSIX-style paths (forward slashes) on all platforms,
+      // so normalize before comparing to the native `path.join` result
+      const toPosix = p => p.split(path.sep).join(path.posix.sep);
+
+      // simulate the file disappearing after it was globbed
+      const statSync = sinon.stub(fs, 'statSync').callsFake(function(target, ...args) {
+        if (toPosix(target) === toPosix(vanishedPath)) {
+          const error = new Error('ENOENT');
+
+          error.code = 'ENOENT';
+
+          throw error;
+        }
+
+        return statSync.wrappedMethod.call(fs, target, ...args);
+      });
+
+      try {
+
+        // when
+        const templates = config.get('bpmn.elementTemplates', null);
+
+        // then
+        // the vanished file is skipped, not surfaced as an error, and the
+        // remaining templates are still returned
+        expect(templates).to.eql([ { id: 'kept' } ]);
+      } finally {
+        statSync.restore();
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
 
   });
