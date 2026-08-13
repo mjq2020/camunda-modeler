@@ -172,6 +172,62 @@ export default class ZeebeAPI {
       processInstanceKey
     });
   }
+
+  getAuthorizations(options, resourceType) {
+    let { endpoint } = options;
+
+    endpoint = getEndpointForTargetType(endpoint);
+
+    return this._backend.send('zeebe:getAuthorizations', {
+      endpoint,
+      resourceType
+    });
+  }
+
+  searchClusterVariables(options, filter) {
+    let { endpoint } = options;
+
+    endpoint = getEndpointForTargetType(endpoint);
+
+    return this._backend.send('zeebe:searchClusterVariables', {
+      endpoint,
+      filter
+    });
+  }
+
+  getClusterVariable(options, name) {
+    let { endpoint } = options;
+
+    endpoint = getEndpointForTargetType(endpoint);
+
+    return this._backend.send('zeebe:getClusterVariable', {
+      endpoint,
+      name
+    });
+  }
+
+  createClusterVariable(options, variable) {
+    let { endpoint } = options;
+
+    endpoint = getEndpointForTargetType(endpoint);
+
+    return this._backend.send('zeebe:createClusterVariable', {
+      endpoint,
+      variable
+    });
+  }
+
+  updateClusterVariable(options, name, variable) {
+    let { endpoint } = options;
+
+    endpoint = getEndpointForTargetType(endpoint);
+
+    return this._backend.send('zeebe:updateClusterVariable', {
+      endpoint,
+      name,
+      variable
+    });
+  }
 }
 
 /**
